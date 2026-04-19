@@ -1,0 +1,15 @@
+services:
+  mediforge:
+    build: .
+    container_name: mediforge
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ${MASTER_INBOX:-./inbox}:/inbox
+      - ${JELLYFIN_LIBRARY:?}:/jellyfin
+      - ${ARCHIVE_DIR:-./archive}:/archive
+      - ${SSH_KEY_PATH:-~/.ssh/id_ed25519}:/root/.ssh/id_ed25519:ro
+    environment:
+      - JELLYFIN_LIBRARY=/jellyfin
+      - ARCHIVE_DIR=${ARCHIVE_ENABLED:+/archive}
+      - SSH_KEY=/root/.ssh/id_ed25519
