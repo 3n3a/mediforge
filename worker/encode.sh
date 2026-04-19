@@ -44,26 +44,36 @@ fi
 
 log "Encoding: $INPUT -> $OUTPUT"
 
+# Common mapping: all video, all audio, all subtitles (? = don't fail if absent)
+# Subtitles converted to mov_text (MP4-compatible). Other audio tracks copied as-is
+# if already AAC-friendly; otherwise re-encoded. We re-encode audio track 0 to AAC
+# stereo for compatibility, and copy additional audio tracks.
+MAP_ARGS=(
+    -map 0:v -map 0:a -map "0:s?"
+)
+
 if ffmpeg -encoders 2>/dev/null | grep -q h264_videotoolbox; then
     log "Encoder: h264_videotoolbox (GPU)"
     FFMPEG_CMD=(
         ffmpeg -y -i "$INPUT"
+        "${MAP_ARGS[@]}"
         -c:v h264_videotoolbox -b:v 4000k -pix_fmt yuv420p
         -profile:v high -level 4.1
         -c:a aac -b:a 192k -ac 2
+        -c:s mov_text
         -movflags +faststart
-        -map 0:v:0 -map 0:a:0
         "$OUTPUT"
     )
 else
     log "Encoder: libx264 (CPU fallback)"
     FFMPEG_CMD=(
         ffmpeg -y -i "$INPUT"
+        "${MAP_ARGS[@]}"
         -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p
         -profile:v high -level 4.1
         -c:a aac -b:a 192k -ac 2
+        -c:s mov_text
         -movflags +faststart
-        -map 0:v:0 -map 0:a:0
         "$OUTPUT"
     )
 fi
