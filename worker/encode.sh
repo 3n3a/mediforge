@@ -9,6 +9,8 @@ PIPELINE_PROFILE="${PIPELINE_PROFILE:-$HOME/media-pipeline/profile.sh}"
 
 log() { echo "[encode] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
+[[ -n "${DEBUG:-}" ]] && set -x
+
 [[ -f "$PIPELINE_PROFILE" ]] && source "$PIPELINE_PROFILE"
 
 if ! command -v ffmpeg &>/dev/null; then
@@ -42,15 +44,29 @@ fi
 
 log "Encoding: $INPUT -> $OUTPUT"
 
-FFMPEG_CMD=(
-    ffmpeg -y -i "$INPUT"
-    -c:v libx264 -preset medium -crf 20
-    -profile:v high -level 4.1
-    -c:a aac -b:a 192k -ac 2
-    -movflags +faststart
-    -map 0:v:0 -map 0:a:0
-    "$OUTPUT"
-)
+if ffmpeg -encoders 2>/dev/null | grep -q h264_videotoolbox; then
+    log "Encoder: h264_videotoolbox (GPU)"
+    FFMPEG_CMD=(
+        ffmpeg -y -i "$INPUT"
+        -c:v h264_videotoolbox -b:v 4000k -pix_fmt yuv420p
+        -profile:v high -level 4.1
+        -c:a aac -b:a 192k -ac 2
+        -movflags +faststart
+        -map 0:v:0 -map 0:a:0
+        "$OUTPUT"
+    )
+else
+    log "Encoder: libx264 (CPU fallback)"
+    FFMPEG_CMD=(
+        ffmpeg -y -i "$INPUT"
+        -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p
+        -profile:v high -level 4.1
+        -c:a aac -b:a 192k -ac 2
+        -movflags +faststart
+        -map 0:v:0 -map 0:a:0
+        "$OUTPUT"
+    )
+fi
 
 log "Command: ${FFMPEG_CMD[*]}"
 
@@ -58,6 +74,10 @@ if "${FFMPEG_CMD[@]}"; then
     log "SUCCESS: $OUTPUT"
 else
     log "FAILED: ffmpeg exited with $?"
-    rm -f "$OUTPUT"
+    if [[ -n "${DEBUG:-}" ]]; then
+        log "DEBUG: skipping cleanup of output: $OUTPUT"
+    else
+        rm -f "$OUTPUT"
+    fi
     exit 1
 fi

@@ -6,6 +6,8 @@ set -euo pipefail
 # Exit 1 = needs encoding (prints reason)
 # Usage: probe.sh <file>
 
+[[ -n "${DEBUG:-}" ]] && set -x
+
 if [[ $# -lt 1 ]]; then
     echo "Usage: probe.sh <file>" >&2
     exit 1

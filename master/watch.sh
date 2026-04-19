@@ -13,6 +13,8 @@ MEDIA_EXTENSIONS="mkv|avi|mp4|mov|ts|wmv|flv|m4v|webm"
 
 log() { echo "[watch] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
+[[ -n "${DEBUG:-}" ]] && set -x
+
 is_media_file() {
     local file="$1"
     local ext="${file##*.}"

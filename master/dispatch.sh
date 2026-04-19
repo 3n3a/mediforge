@@ -16,14 +16,21 @@ WORKER_ENCODE_SCRIPT="${WORKER_ENCODE_SCRIPT:-/Users/$WORKER_USER/media-pipeline
 JELLYFIN_LIBRARY="${JELLYFIN_LIBRARY:?JELLYFIN_LIBRARY not set}"
 ARCHIVE_DIR="${ARCHIVE_DIR:-}"
 SSH_KEY="${SSH_KEY:-/root/.ssh/id_ed25519}"
+PIPELINE_PROFILE="${PIPELINE_PROFILE:-}"
 
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10)
 SSH_TARGET="${WORKER_USER}@${WORKER_HOST}"
 
 log() { echo "[dispatch] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
+[[ -n "${DEBUG:-}" ]] && set -x
+
 cleanup_worker() {
     local remote_file="$1"
+    if [[ -n "${DEBUG:-}" ]]; then
+        log "DEBUG: skipping cleanup of worker file: $remote_file"
+        return
+    fi
     log "Cleaning up worker: $remote_file"
     ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "rm -f '$remote_file'" 2>/dev/null || true
 }
@@ -58,8 +65,11 @@ scp "${SSH_OPTS[@]}" "$INPUT" "$SSH_TARGET:$REMOTE_INPUT"
 
 # Step 3: ssh worker to run encode
 REMOTE_OUTPUT="$WORKER_OUTBOX/$OUTPUT_NAME"
+WORKER_ENV=""
+[[ -n "$PIPELINE_PROFILE" ]] && WORKER_ENV+="PIPELINE_PROFILE='$PIPELINE_PROFILE' "
+[[ -n "${DEBUG:-}" ]] && WORKER_ENV+="DEBUG='1' "
 log "Encoding on worker: $REMOTE_INPUT"
-if ! ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "bash '$WORKER_ENCODE_SCRIPT' '$REMOTE_INPUT'"; then
+if ! ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "${WORKER_ENV}bash '$WORKER_ENCODE_SCRIPT' '$REMOTE_INPUT'"; then
     log "ERROR: encoding failed on worker"
     cleanup_worker "$REMOTE_INPUT"
     exit 1
@@ -81,7 +91,9 @@ log "Cleaning up"
 cleanup_worker "$REMOTE_INPUT"
 cleanup_worker "$REMOTE_OUTPUT"
 
-if [[ -n "$ARCHIVE_DIR" ]]; then
+if [[ -n "${DEBUG:-}" ]]; then
+    log "DEBUG: skipping cleanup of master input: $INPUT"
+elif [[ -n "$ARCHIVE_DIR" ]]; then
     mkdir -p "$ARCHIVE_DIR"
     mv "$INPUT" "$ARCHIVE_DIR/$BASENAME"
     log "Archived original: $ARCHIVE_DIR/$BASENAME"
