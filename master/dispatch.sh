@@ -19,7 +19,8 @@ SSH_KEY="${SSH_KEY:-/root/.ssh/id_ed25519}"
 PIPELINE_PROFILE="${PIPELINE_PROFILE:-}"
 MEDIA_EXTENSIONS="mkv|avi|mp4|mov|ts|wmv|flv|m4v|webm"
 
-SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10)
+SSH_OPTS=(-n -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10)
+SCP_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10)
 SSH_TARGET="${WORKER_USER}@${WORKER_HOST}"
 
 log() { echo "[dispatch] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
@@ -80,7 +81,7 @@ dispatch_file() {
     local REMOTE_INPUT="$WORKER_INBOX/$BASENAME"
     log "Uploading: $INPUT -> $SSH_TARGET:$REMOTE_INPUT"
     ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "mkdir -p '$WORKER_INBOX' '$WORKER_OUTBOX'"
-    scp "${SSH_OPTS[@]}" "$INPUT" "$SSH_TARGET:$REMOTE_INPUT"
+    scp "${SCP_OPTS[@]}" "$INPUT" "$SSH_TARGET:$REMOTE_INPUT"
 
     # Step 3: ssh worker to run encode
     local REMOTE_OUTPUT="$WORKER_OUTBOX/$OUTPUT_NAME"
@@ -97,7 +98,7 @@ dispatch_file() {
     # Step 4: scp encoded file back to Jellyfin library
     log "Downloading: $SSH_TARGET:$REMOTE_OUTPUT -> $LOCAL_OUTPUT"
     mkdir -p "$(dirname "$LOCAL_OUTPUT")"
-    if ! scp "${SSH_OPTS[@]}" "$SSH_TARGET:$REMOTE_OUTPUT" "$LOCAL_OUTPUT"; then
+    if ! scp "${SCP_OPTS[@]}" "$SSH_TARGET:$REMOTE_OUTPUT" "$LOCAL_OUTPUT"; then
         log "ERROR: failed to retrieve encoded file"
         cleanup_worker "$REMOTE_INPUT"
         cleanup_worker "$REMOTE_OUTPUT"
