@@ -5,8 +5,16 @@ set -euo pipefail
 # Usage: encode.sh <input-file>
 
 OUTBOX="${OUTBOX:-$HOME/media-pipeline/outbox}"
+PIPELINE_PROFILE="${PIPELINE_PROFILE:-$HOME/media-pipeline/profile.sh}"
 
 log() { echo "[encode] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+[[ -f "$PIPELINE_PROFILE" ]] && source "$PIPELINE_PROFILE"
+
+if ! command -v ffmpeg &>/dev/null; then
+    log "ERROR: ffmpeg not found. Install it with: brew install ffmpeg"
+    exit 1
+fi
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: encode.sh <input-file>" >&2
