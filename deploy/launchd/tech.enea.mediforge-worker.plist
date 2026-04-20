@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>tech.enea.mediforge-worker</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/mediforge-worker</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>LISTEN_ADDR</key>
+        <string>:8080</string>
+        <key>WORKER_TOKEN</key>
+        <string>REPLACE_WITH_SHARED_SECRET</string>
+        <key>WORK_DIR</key>
+        <string>/Users/mediforge/.mediforge/work</string>
+        <key>ENCODER</key>
+        <string>auto</string>
+        <key>LOG_LEVEL</key>
+        <string>info</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/mediforge/Library/Logs/mediforge-worker.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mediforge/Library/Logs/mediforge-worker.err.log</string>
+</dict>
+</plist>

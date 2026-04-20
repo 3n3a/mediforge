@@ -1,15 +1,20 @@
 services:
   mediforge:
     build: .
+    image: mediforge:latest
     container_name: mediforge
-    restart: unless-stopped
     env_file: .env
     volumes:
-      - ${MASTER_INBOX:-./inbox}:/inbox
-      - ${JELLYFIN_LIBRARY:?}:/jellyfin
-      - ${ARCHIVE_DIR:-./archive}:/archive
-      - ${SSH_KEY_PATH:-~/.ssh/id_ed25519}:/root/.ssh/id_ed25519:ro
+      - ${MEDIA_TV:?MEDIA_TV is required}:/media/tv
+      - ${MEDIA_MOVIES:?MEDIA_MOVIES is required}:/media/movies
+      - mediforge-db:/var/lib/mediforge
     environment:
-      - JELLYFIN_LIBRARY=/jellyfin
-      - ARCHIVE_DIR=${ARCHIVE_ENABLED:+/archive}
-      - SSH_KEY=/root/.ssh/id_ed25519
+      - MEDIA_LIBRARIES=tv:/media/tv,movies:/media/movies
+      - MEDIFORGE_DB=/var/lib/mediforge/mediforge.db
+    # No restart policy — mediforge is not a long-running watcher.
+    # Run manually: docker compose run --rm mediforge dispatch
+    # Or via cron on the host:
+    #   0 */6 * * * docker compose -f /path/to/docker-compose.yml run --rm mediforge dispatch
+
+volumes:
+  mediforge-db:

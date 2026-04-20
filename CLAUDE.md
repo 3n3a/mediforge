@@ -2,102 +2,129 @@
 
 ## Overview
 
-A minimal master/worker media encoding pipeline. An Unraid server (master) dispatches encoding jobs to a Mac Mini M2 (worker) over SSH. Encoded files are returned to the Unraid Jellyfin library as H.264 High + AAC MP4s.
+A minimal master/worker media encoder. The master (Go CLI in an Alpine Docker
+container on Unraid) walks named media library folders in place and dispatches
+encoding jobs to a Mac Mini M2 worker (Go HTTP server, native launchd) over
+HTTP. Encoded files are H.264 High Level 4.1 + AAC stereo MP4s.
 
 ## Architecture
 
 ```
-[Unraid Docker Container (Master)]
-  ├── watches /inbox for new media files (inotifywait via watch.sh)
-  ├── probe.sh: ffprobe check — skip if already H.264 High + AAC in MP4
-  ├── scp file → Mac Mini worker inbox
-  ├── ssh triggers encode.sh on worker
-  ├── scp result back → Jellyfin library
-  └── cleans up temp files on both sides
+[Unraid Docker Container (Master — Go)]
+  mediforge dispatch [library...]
+    ├── walks MEDIA_LIBRARIES folders recursively in place
+    ├── SQLite probe cache (WAL) skips already-checked files by (path,size,mtime)
+    ├── HTTPS POST /encode → worker (streamed upload, streamed download)
+    ├── safe-replace: .<basename>.original sidecar, atomic rename, fsync dir
+    ├── SQLite jobs ledger: attempts + retry budget + permanent failure gate
+    └── optional Jellyfin /Library/Refresh trigger on success
 
-[Mac Mini M2 (Worker)]
-  ├── ~/media-pipeline/inbox/
-  ├── ~/media-pipeline/outbox/
-  ├── ~/media-pipeline/encode.sh   — ffmpeg encode script
-  └── ~/media-pipeline/profile.sh  — sourced by encode.sh; sets PATH/env
+[Mac Mini M2 (Worker — Go native via launchd)]
+  mediforge-worker
+    ├── POST /encode (bearer auth, one at a time via sync.Mutex)
+    ├── ffmpeg: VideoToolbox GPU preferred, libx264 fallback
+    └── GET /health
 ```
 
-Communication: SSH with key-based auth. No web framework, no message queue, no database.
+Transport: HTTP + shared-secret bearer token over the trusted LAN.
+No SSH, no inotify, no inbox/outbox.
 
-## Repo Layout
+## Repo layout
 
 ```
-master/
-  dispatch.sh     — scp → ssh encode → scp back → cleanup
-  probe.sh        — ffprobe check; exit 0 = skip, exit 1 = needs encode
-  watch.sh        — inotifywait loop; calls dispatch.sh per file
-worker/
-  encode.sh       — ffmpeg encode; sources profile.sh for PATH
-  profile.sh      — default profile; copy to ~/media-pipeline/profile.sh on worker
-Dockerfile        — Alpine image with openssh-client, ffmpeg, bash, inotify-tools, python3
+cmd/
+  mediforge/              master CLI
+  mediforge-worker/       worker HTTP server
+internal/
+  config/                 env parsing for both binaries
+  logx/                   slog setup
+  probe/                  ffprobe wrapper + IsTarget predicate
+  cache/                  SQLite: probes + jobs + job_attempts
+  scan/                   recursive walk, ext filter, skips hidden files
+  dispatch/               orchestrator + flock
+  client/                 HTTP client with bearer auth + 503/network retries
+  httpapi/                shared DTOs + bearer auth middleware
+  encode/                 worker-side ffmpeg invocation
+  archive/                safe-replace via .original sidecar
+  jellyfin/               refresh trigger (gated by env)
+deploy/
+  launchd/                sample plist for the worker
+Dockerfile                multi-stage alpine; CGO_ENABLED=0
 docker-compose.yml
 .env.example
 ```
 
-## Target Output Format
+## Target output format
 
 ```bash
-ffmpeg -i input.mkv \
-  -c:v libx264 -preset medium -crf 20 \
+ffmpeg -y -i input.ext \
+  -map 0:v -map 0:a -map "0:s?" \
+  -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p \
   -profile:v high -level 4.1 \
   -c:a aac -b:a 192k -ac 2 \
+  -c:s mov_text \
   -movflags +faststart \
-  -map 0:v:0 -map 0:a:0 \
   output.mp4
 ```
 
-- **MP4 + H.264 High Profile Level 4.1** — direct-plays on every target device including Apple TV 3rd gen (bottleneck device).
-- **AAC stereo 192k** — universal compatibility.
-- **`-movflags +faststart`** — moov atom at front for immediate Jellyfin streaming.
-- **Software encode (libx264)** — better quality-per-bit on M2's 8 performance cores.
+GPU path: `-c:v h264_videotoolbox -b:v 4000k` when the ffmpeg build supports it.
+The predicate for "already in target format": container ∈ {mov, mp4, m4a};
+video = h264; video profile = high; audio = aac.
 
-## Target Devices
+## Target devices
 
-- Android/iOS phones, PCs (browser/desktop), Smart TVs
-- Apple TV 4th gen (HEVC capable)
-- Apple TV 3rd gen (H.264 only, 1080p max) ← bottleneck
+Android/iOS phones, PCs (browser/desktop), Smart TVs, Apple TV 4th gen (HEVC),
+Apple TV 3rd gen (H.264 only, 1080p max) — the bottleneck device.
 
-## Tech Stack
+## Tech stack
 
-- **Language: Bash** — ffmpeg is designed to be shell-driven. Graduate to Go only if complex state, concurrency, or health checks become necessary.
-- **Master container: Alpine Linux** — openssh-client, ffmpeg (for ffprobe), bash, inotify-tools, python3
-- **Worker: macOS** — Homebrew ffmpeg, no containerisation
-- **Transport: scp/ssh** — key-based auth, no passwords
+- **Language: Go** (1.22+). stdlib `net/http`, `log/slog`, `flag`, `database/sql`.
+- **SQLite: `modernc.org/sqlite`** — pure Go, no CGO, `CGO_ENABLED=0` builds.
+- **Master container: alpine:3.20 + ffmpeg** — ffprobe on master, encode on worker.
+- **Worker: macOS native** via launchd. `brew install ffmpeg`.
 
-## Worker PATH / Environment
-
-SSH non-login shells don't source shell profiles, so Homebrew binaries may be missing from PATH. `encode.sh` sources `~/media-pipeline/profile.sh` before invoking ffmpeg. The default `worker/profile.sh` prepends `/usr/local/bin` and `/opt/homebrew/bin`. Override the profile path with `PIPELINE_PROFILE`.
+Total third-party dependency: 1 (the SQLite driver; its transitive deps
+notwithstanding).
 
 ## Conventions
 
-- KISS. No web UI, no JS frameworks, no unnecessary dependencies.
+- KISS. No web UI, no job queue (the jobs table is a ledger, not a queue), no
+  message broker. Single master, single worker.
 - One encoding profile. Add profiles only as concrete needs arise.
-- Shell scripts are the default. Only introduce Go when bash becomes the bottleneck.
-- All ffmpeg commands are logged with full arguments for reproducibility.
-- Idempotent: re-running on an already-encoded file is a no-op (probe check + output-newer-than-input guard).
+- Structured logging via `log/slog`. One line per file with `action=` key.
+- Idempotent: probe cache makes repeat dispatch runs near-free; failed files
+  quiesce after `MAX_RETRIES` attempts and require explicit action to retry.
 
-## Implementation Status
+## Commands
+
+```
+mediforge dispatch [library...]         Encode files not already in target format
+mediforge probe <file>                  Probe a single file; print JSON
+mediforge cache stats                   Row counts, jobs breakdown, DB size
+mediforge cache evict <path>            Forget a file (probe + job rows)
+mediforge jobs list [--status=STATUS]   Listing with optional status filter
+mediforge jobs retry <path>             Reset attempts to 0 and flip status to 'failed'
+mediforge version
+```
+
+## Implementation status
 
 ### Phase 1 — Bare minimum ✓
-- [x] Worker encode script (`worker/encode.sh`)
-- [x] Worker profile script (`worker/profile.sh`) — PATH setup for Homebrew
-- [x] Master dispatch script (`master/dispatch.sh`)
-- [x] ffprobe pre-check (`master/probe.sh`)
+- [x] Worker HTTP server + ffmpeg pipeline (`cmd/mediforge-worker/`)
+- [x] Master CLI + probe + dispatch (`cmd/mediforge/`)
 
-### Phase 2 — Automation ✓
-- [x] Master watch loop (`master/watch.sh`) — inotifywait + settle/stability check
-- [x] ffprobe pre-check to skip already-encoded files
-- [x] Logging (stdout, redirectable)
-- [x] Dockerfile + docker-compose
+### Phase 2 — Caching + safety ✓
+- [x] SQLite probe cache (WAL) keyed by (path, size, mtime)
+- [x] Jobs ledger with attempts + retry budget + `failed_permanent` gate
+- [x] Safe-replace via `.original` sidecar (no data-loss on same-filename)
+- [x] Lockfile to prevent concurrent dispatch runs
 
-### Phase 3 — Hardening (only if needed)
-- [ ] Job queue (file-based or SQLite) to survive restarts
-- [ ] Multiple worker support
-- [ ] Completion/failure notifications (webhook, email, Unraid notification)
-- [ ] Health check endpoint (if rewritten in Go)
-- [ ] Optional HEVC profile for non-Apple-TV-3 content
+### Phase 3 — Optional integrations ✓
+- [x] Optional Jellyfin `/Library/Refresh` trigger, gated by
+      `JELLYFIN_INTEGRATION_ENABLED`
+
+### Phase 4 — Future (only if needed)
+- [ ] `archive` mode (move originals to `ARCHIVE_DIR` instead of `replace`)
+- [ ] Multiple worker support (requires worker selection strategy)
+- [ ] Disk-space preflight on worker (507 Insufficient Storage)
+- [ ] Alternate encoding profiles (HEVC for non-Apple-TV-3 content)
