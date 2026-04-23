@@ -27,7 +27,12 @@ No inotify. No inbox/outbox. No periodic scans. Manual or cron-driven.
 - **Safe replace.** During the swap the original is renamed to a hidden
   `.<basename>.original` sidecar; it's only deleted after the encoded file is
   written and fsync'd. Same-filename cases (a `.mp4` with wrong codec) are
-  handled correctly.
+  handled correctly. External subtitle sidecars (see below) are placed in the
+  same atomic step — any failure unrolls all moves.
+- **External subtitles.** Text subtitle tracks are extracted from the source
+  on the master into `<stem>.default.srt` / `<stem>.<lang>.<N>.srt` (Jellyfin
+  convention). The output MP4 contains video + audio only. Bitmap subs (PGS /
+  DVD / DVB) are logged and skipped — they require OCR.
 - **Probe cache.** ffprobe results are cached in SQLite keyed by
   `(path, size, mtime)`. Subsequent dispatch runs skip already-checked files
   without re-probing.
@@ -52,19 +57,33 @@ Edit `.env` and set at minimum:
 - `WORKER_TOKEN` — `openssl rand -hex 32` (must match worker)
 - `MEDIA_TV` / `MEDIA_MOVIES` — host paths for the volume mounts
 
-### 2. Build and run
+### 2. Build and start the container
+
+The container is a long-running idle shell — it does **not** encode
+automatically on start. Bring it up once; trigger work with `exec`.
 
 ```bash
 docker compose build
-docker compose run --rm mediforge dispatch            # all libraries
-docker compose run --rm mediforge dispatch tv         # one library
-docker compose run --rm mediforge dispatch --dry-run  # what would happen
+docker compose up -d                                  # start; stays running
+docker compose ps                                     # confirm "running"
 ```
 
-For periodic runs, add a host cron entry:
+### 3. Run commands on demand
+
+```bash
+docker compose exec mediforge mediforge dispatch            # all libraries
+docker compose exec mediforge mediforge dispatch tv         # one library
+docker compose exec mediforge mediforge dispatch --dry-run  # what would happen
+docker compose exec mediforge mediforge jobs list           # any subcommand
+```
+
+Or `docker exec -it mediforge sh` for an interactive shell.
+
+For periodic runs, add a host cron entry (`-T` disables TTY allocation, needed
+when cron has no terminal):
 
 ```
-0 */6 * * * docker compose -f /path/to/docker-compose.yml run --rm mediforge dispatch >> /var/log/mediforge.log 2>&1
+0 */6 * * * docker compose -f /path/to/docker-compose.yml exec -T mediforge mediforge dispatch >> /var/log/mediforge.log 2>&1
 ```
 
 ---
@@ -98,16 +117,27 @@ Exit codes: `0` success, `1` partial failure, `2` config/startup error.
 ## Target output format
 
 ```
+-map 0:v -map 0:a -sn
 -c:v libx264 -preset medium -crf 20 (or h264_videotoolbox -b:v 4000k)
 -profile:v high -level 4.1
 -c:a aac -b:a 192k -ac 2
--c:s mov_text
 -movflags +faststart
--map 0:v -map 0:a -map "0:s?"
 ```
 
+Video + audio only. Subtitles are extracted as external `.srt` sidecars on
+the master (see "Key behaviour" above).
+
 Files already matching (container ∈ {mov, mp4, m4a}, video = h264 high, audio =
-aac) are skipped.
+aac) are skipped. Files already matching the codec predicate but containing
+embedded `mov_text` subs from the old pipeline can be fixed with the one-off
+backfill script:
+
+```
+deploy/fix-embedded-subs.sh /media/tv /media/movies
+```
+
+It extracts every embedded text subtitle track to an external `.srt` and
+stream-copy remuxes the MP4 without subtitle tracks (no re-encode).
 
 ---
 
@@ -126,6 +156,8 @@ aac) are skipped.
 | `HTTP_TIMEOUT_UPLOAD` | no | `30m` | per-file upload deadline |
 | `HTTP_TIMEOUT_ENCODE` | no | `6h` | per-file total deadline |
 | `MEDIA_EXTENSIONS` | no | `mkv,avi,mp4,mov,ts,wmv,flv,m4v,webm` | scan filter |
+| `FFMPEG_BIN` | no | `ffmpeg` (PATH) | used for subtitle extraction |
+| `FFPROBE_BIN` | no | `ffprobe` (PATH) | used for probing + sub enumeration |
 | `LOG_LEVEL` | no | `info` | |
 | `LOG_FORMAT` | no | `text` | `text` or `json` |
 | `JELLYFIN_INTEGRATION_ENABLED` | no | `false` | gate for refresh trigger |
@@ -176,6 +208,12 @@ A prior run crashed holding the lockfile, or a genuine concurrent run exists.
 The lockfile is at `$MEDIFORGE_DB.lock`. If no process is running, remove it.
 
 **Encoded file failed to replace original**
-The operation is atomic — either the final `.mp4` is in place or the
-`.original` sidecar restored the source. If you see leftover
-`.*.mediforge.tmp` files after a crash, they're safe to delete.
+The operation is atomic — either the final `.mp4` is in place (with any
+extracted `.srt` sidecars) or the `.original` sidecar restored the source.
+If you see leftover `.*.mediforge.tmp` or `.*.mediforge.sub.*.srt.tmp` files
+after a crash, they're safe to delete.
+
+**Subtitles not showing in Jellyfin after migration**
+If a file was processed by the old pipeline (subs embedded as `mov_text`),
+run `deploy/fix-embedded-subs.sh <path>` to extract them to external `.srt`
+sidecars and strip the embedded track.

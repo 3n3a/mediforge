@@ -17,12 +17,14 @@ import (
 	"github.com/3n3a/mediforge/internal/jellyfin"
 	"github.com/3n3a/mediforge/internal/probe"
 	"github.com/3n3a/mediforge/internal/scan"
+	"github.com/3n3a/mediforge/internal/subtitles"
 )
 
 type Options struct {
 	DryRun       bool
 	Force        bool
 	MaxRetries   int
+	FFmpegBin    string
 	FFprobeBin   string
 	Libraries    []config.Library
 	Jellyfin     *jellyfin.Client // nil when disabled
@@ -276,9 +278,30 @@ func (r *Runner) processFile(ctx context.Context, lib config.Library, file strin
 		return
 	}
 
-	finalPath, err := archive.SafeReplace(file, tmp)
+	// Extract text subtitle tracks from the original source into SRT sidecars
+	// before the SafeReplace atomically moves everything into place.
+	subCtx, subCancel := context.WithTimeout(ctx, 10*time.Minute)
+	sidecars, subErr := subtitles.Extract(subCtx, logger, opts.FFmpegBin, opts.FFprobeBin, file)
+	subCancel()
+	if subErr != nil {
+		_ = os.Remove(tmp)
+		if ferr := r.cache.FailAttempt(file, "subtitle_extract_failed", subErr.Error(), opts.MaxRetries); ferr != nil {
+			logger.Warn("jobs fail attempt", slog.String("err", ferr.Error()))
+		}
+		logger.Warn("subtitle extract failed",
+			slog.String("action", "error"),
+			slog.String("reason", "subtitle_extract_failed"),
+			slog.String("err", subErr.Error()),
+			slog.Int("attempt", attempt),
+		)
+		s.failed++
+		return
+	}
+
+	finalPath, err := archive.SafeReplaceWithSidecars(file, tmp, sidecars)
 	if err != nil {
 		_ = os.Remove(tmp)
+		subtitles.CleanupTmp(sidecars)
 		if ferr := r.cache.FailAttempt(file, "archive_failed", err.Error(), opts.MaxRetries); ferr != nil {
 			logger.Warn("jobs fail attempt", slog.String("err", ferr.Error()))
 		}
@@ -304,6 +327,7 @@ func (r *Runner) processFile(ctx context.Context, lib config.Library, file strin
 		slog.Duration("duration", encDuration),
 		slog.Duration("total", time.Since(attemptStart)),
 		slog.Int("attempt", attempt),
+		slog.Int("subs_extracted", len(sidecars)),
 		slog.String("final", trimRoot(finalPath, lib.Root)),
 	)
 	s.encoded++

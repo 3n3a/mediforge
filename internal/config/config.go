@@ -25,6 +25,8 @@ type Master struct {
 	UploadTimeout     time.Duration
 	EncodeTimeout     time.Duration
 	MediaExtensions   []string
+	FFmpegBin         string
+	FFprobeBin        string
 	LogLevel          string
 	LogFormat         string
 	JellyfinEnabled   bool
@@ -49,6 +51,8 @@ func LoadMaster() (*Master, error) {
 	cfg := &Master{
 		ArchiveMode:     getenv("ARCHIVE_MODE", "replace"),
 		DBPath:          getenv("MEDIFORGE_DB", "/var/lib/mediforge/mediforge.db"),
+		FFmpegBin:       getenv("FFMPEG_BIN", "ffmpeg"),
+		FFprobeBin:      getenv("FFPROBE_BIN", "ffprobe"),
 		LogLevel:        getenv("LOG_LEVEL", "info"),
 		LogFormat:       getenv("LOG_FORMAT", "text"),
 		JellyfinEnabled: getenvBool("JELLYFIN_INTEGRATION_ENABLED", false),

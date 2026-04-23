@@ -15,14 +15,15 @@ HTTP. Encoded files are H.264 High Level 4.1 + AAC stereo MP4s.
     ├── walks MEDIA_LIBRARIES folders recursively in place
     ├── SQLite probe cache (WAL) skips already-checked files by (path,size,mtime)
     ├── HTTPS POST /encode → worker (streamed upload, streamed download)
-    ├── safe-replace: .<basename>.original sidecar, atomic rename, fsync dir
+    ├── extracts text subtitles from source to <stem>.default.srt sidecars (ffmpeg)
+    ├── safe-replace: .<basename>.original sidecar, atomic rename of mp4 + srts
     ├── SQLite jobs ledger: attempts + retry budget + permanent failure gate
     └── optional Jellyfin /Library/Refresh trigger on success
 
 [Mac Mini M2 (Worker — Go native via launchd)]
   mediforge-worker
     ├── POST /encode (bearer auth, one at a time via sync.Mutex)
-    ├── ffmpeg: VideoToolbox GPU preferred, libx264 fallback
+    ├── ffmpeg: VideoToolbox GPU preferred, libx264 fallback (video + audio only)
     └── GET /health
 ```
 
@@ -44,11 +45,13 @@ internal/
   dispatch/               orchestrator + flock
   client/                 HTTP client with bearer auth + 503/network retries
   httpapi/                shared DTOs + bearer auth middleware
-  encode/                 worker-side ffmpeg invocation
-  archive/                safe-replace via .original sidecar
+  encode/                 worker-side ffmpeg invocation (video + audio only)
+  subtitles/              master-side SRT extraction (Jellyfin sidecars)
+  archive/                safe-replace via .original sidecar + SRT sidecars
   jellyfin/               refresh trigger (gated by env)
 deploy/
   launchd/                sample plist for the worker
+  fix-embedded-subs.sh    one-off backfill: mov_text -> external .srt
 Dockerfile                multi-stage alpine; CGO_ENABLED=0
 docker-compose.yml
 .env.example
@@ -58,18 +61,35 @@ docker-compose.yml
 
 ```bash
 ffmpeg -y -i input.ext \
-  -map 0:v -map 0:a -map "0:s?" \
+  -map 0:v -map 0:a -sn \
   -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p \
   -profile:v high -level 4.1 \
   -c:a aac -b:a 192k -ac 2 \
-  -c:s mov_text \
   -movflags +faststart \
   output.mp4
 ```
 
-GPU path: `-c:v h264_videotoolbox -b:v 4000k` when the ffmpeg build supports it.
-The predicate for "already in target format": container ∈ {mov, mp4, m4a};
-video = h264; video profile = high; audio = aac.
+Video + audio only. GPU path: `-c:v h264_videotoolbox -b:v 4000k` when the
+ffmpeg build supports it. The predicate for "already in target format":
+container ∈ {mov, mp4, m4a}; video = h264; video profile = high; audio = aac.
+
+## Subtitles
+
+Text subtitle tracks are extracted on the master (not muxed into the MP4)
+into external SRT sidecars beside the output file, following the Jellyfin
+naming convention:
+- first text track  -> `<stem>.default.srt`
+- additional tracks -> `<stem>.<lang>.<N>.srt`
+
+Bitmap subtitle codecs (`hdmv_pgs_subtitle`, `dvd_subtitle`, `dvb_subtitle`,
+`xsub`) can't be losslessly converted to SRT and are logged + skipped. The
+encoded MP4 + its SRT sidecars are placed atomically in a single SafeReplace
+step; any failure unrolls all moves.
+
+Files already processed by the old pipeline (embedded `mov_text`) still
+satisfy the codec predicate and are NOT re-dispatched. Use
+`deploy/fix-embedded-subs.sh <path>` to migrate them: extract the embedded
+subs to `.srt` sidecars and stream-copy remux the MP4 without subtitles.
 
 ## Target devices
 
@@ -80,7 +100,7 @@ Apple TV 3rd gen (H.264 only, 1080p max) — the bottleneck device.
 
 - **Language: Go** (1.22+). stdlib `net/http`, `log/slog`, `flag`, `database/sql`.
 - **SQLite: `modernc.org/sqlite`** — pure Go, no CGO, `CGO_ENABLED=0` builds.
-- **Master container: alpine:3.20 + ffmpeg** — ffprobe on master, encode on worker.
+- **Master container: alpine:3.20 + ffmpeg** — ffprobe + sub extraction on master, transcode on worker.
 - **Worker: macOS native** via launchd. `brew install ffmpeg`.
 
 Total third-party dependency: 1 (the SQLite driver; its transitive deps
@@ -123,7 +143,14 @@ mediforge version
 - [x] Optional Jellyfin `/Library/Refresh` trigger, gated by
       `JELLYFIN_INTEGRATION_ENABLED`
 
-### Phase 4 — Future (only if needed)
+### Phase 4 — External subtitles ✓
+- [x] Drop `mov_text` muxing from the worker encode profile (`-sn`)
+- [x] Master-side extraction to `<stem>.default.srt` / `<stem>.<lang>.<N>.srt`
+- [x] Bitmap subs (PGS/DVD/DVB/xsub) skipped with warning
+- [x] `SafeReplaceWithSidecars` — atomic multi-file placement with rollback
+- [x] `deploy/fix-embedded-subs.sh` — one-off backfill for already-processed files
+
+### Phase 5 — Future (only if needed)
 - [ ] `archive` mode (move originals to `ARCHIVE_DIR` instead of `replace`)
 - [ ] Multiple worker support (requires worker selection strategy)
 - [ ] Disk-space preflight on worker (507 Insufficient Storage)

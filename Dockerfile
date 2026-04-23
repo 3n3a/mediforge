@@ -9,5 +9,9 @@ FROM alpine:3.20
 RUN apk add --no-cache ffmpeg ca-certificates tzdata
 COPY --from=build /out/mediforge /usr/local/bin/mediforge
 RUN mkdir -p /var/lib/mediforge
-ENTRYPOINT ["/usr/local/bin/mediforge"]
-CMD ["dispatch"]
+
+# The container is an idle long-running shell. It does NOT dispatch
+# automatically on start — trigger work on demand with:
+#   docker compose exec mediforge mediforge dispatch
+# The mediforge binary is on PATH inside the container.
+CMD ["tail", "-f", "/dev/null"]

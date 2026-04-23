@@ -11,10 +11,13 @@ services:
     environment:
       - MEDIA_LIBRARIES=tv:/media/tv,movies:/media/movies
       - MEDIFORGE_DB=/var/lib/mediforge/mediforge.db
-    # No restart policy — mediforge is not a long-running watcher.
-    # Run manually: docker compose run --rm mediforge dispatch
+    # Long-running idle container. Nothing runs automatically on start.
+    # Trigger work manually:
+    #   docker compose up -d                                 # start (once)
+    #   docker compose exec mediforge mediforge dispatch     # run on demand
     # Or via cron on the host:
-    #   0 */6 * * * docker compose -f /path/to/docker-compose.yml run --rm mediforge dispatch
+    #   0 */6 * * * docker compose -f /path/to/docker-compose.yml exec -T mediforge mediforge dispatch >> /var/log/mediforge.log 2>&1
+    restart: unless-stopped
 
 volumes:
   mediforge-db:

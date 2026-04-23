@@ -136,7 +136,8 @@ func cmdDispatch(ctx context.Context, args []string) int {
 		DryRun:     *dryRun,
 		Force:      *force,
 		MaxRetries: cfg.MaxRetries,
-		FFprobeBin: "ffprobe",
+		FFmpegBin:  cfg.FFmpegBin,
+		FFprobeBin: cfg.FFprobeBin,
 		Libraries:  libs,
 	}
 	if *maxRetries > 0 {
@@ -175,9 +176,14 @@ func cmdProbe(ctx context.Context, args []string) int {
 		return 2
 	}
 
+	ffprobeBin := "ffprobe"
+	if cfg, err := config.LoadMaster(); err == nil {
+		ffprobeBin = cfg.FFprobeBin
+	}
+
 	pctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	res, err := probe.Run(pctx, "ffprobe", file)
+	res, err := probe.Run(pctx, ffprobeBin, file)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

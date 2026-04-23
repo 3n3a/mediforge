@@ -22,9 +22,11 @@ type Result struct {
 }
 
 // Encode runs ffmpeg to transcode Input -> Output with the target profile.
-// Mirrors worker/encode.sh: preserves mapping (-map 0:v -map 0:a -map "0:s?"),
-// GPU via h264_videotoolbox when available, libx264 -preset medium -crf 20 fallback;
-// H.264 High / Level 4.1, AAC stereo 192k, mov_text subs, +faststart.
+// Video+audio only — subtitles are handled out-of-band on the master as
+// external SRT sidecars (see internal/subtitles). -sn ensures no subtitle
+// stream leaks into the output regardless of what exists in the input.
+// GPU via h264_videotoolbox when available, libx264 -preset medium -crf 20
+// fallback; H.264 High / Level 4.1, AAC stereo 192k, +faststart.
 func Encode(ctx context.Context, opts Options) (Result, error) {
 	encoder, err := pickEncoder(ctx, opts.FFmpegBin, opts.Encoder)
 	if err != nil {
@@ -32,7 +34,7 @@ func Encode(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	args := []string{"-y", "-hide_banner", "-nostats", "-i", opts.Input,
-		"-map", "0:v", "-map", "0:a", "-map", "0:s?"}
+		"-map", "0:v", "-map", "0:a", "-sn"}
 
 	if encoder == "h264_videotoolbox" {
 		args = append(args,
@@ -48,7 +50,6 @@ func Encode(ctx context.Context, opts Options) (Result, error) {
 
 	args = append(args,
 		"-c:a", "aac", "-b:a", "192k", "-ac", "2",
-		"-c:s", "mov_text",
 		"-movflags", "+faststart",
 		opts.Output,
 	)
