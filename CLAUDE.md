@@ -47,7 +47,7 @@ internal/
   httpapi/                shared DTOs + bearer auth middleware
   encode/                 worker-side ffmpeg invocation (video + audio only)
   subtitles/              master-side SRT extraction (Jellyfin sidecars)
-  archive/                safe-replace via .original sidecar + SRT sidecars
+  archive/                safe-replace (.original sidecar) + safe-archive (move to ARCHIVE_DIR)
   jellyfin/               refresh trigger (gated by env)
 deploy/
   launchd/                sample plist for the worker

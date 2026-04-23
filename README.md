@@ -29,6 +29,12 @@ No inotify. No inbox/outbox. No periodic scans. Manual or cron-driven.
   written and fsync'd. Same-filename cases (a `.mp4` with wrong codec) are
   handled correctly. External subtitle sidecars (see below) are placed in the
   same atomic step — any failure unrolls all moves.
+- **Archive mode (optional).** Set `ARCHIVE_MODE=archive` + `ARCHIVE_DIR=/mnt/archive`
+  to preserve originals instead of deleting them. Each source lands at
+  `ARCHIVE_DIR/<libName>/<relpath>` (folder structure starting at the library
+  root is preserved). Cross-filesystem safe: falls back to copy + fsync + unlink
+  on `EXDEV`. Collisions with an identical file (size+mtime match) skip the
+  move; collisions with a different file auto-suffix as `foo.1.mkv`, `foo.2.mkv`, …
 - **External subtitles.** Text subtitle tracks are extracted from the source
   on the master into `<stem>.default.srt` / `<stem>.<lang>.<N>.srt` (Jellyfin
   convention). The output MP4 contains video + audio only. Bitmap subs (PGS /
@@ -150,7 +156,8 @@ stream-copy remuxes the MP4 without subtitle tracks (no re-encode).
 | `MEDIA_LIBRARIES` | yes | — | `tv:/media/tv,movies:/media/movies` |
 | `WORKER_URL` | yes | — | `http://mac-mini.lan:8080` |
 | `WORKER_TOKEN` | yes | — | shared secret |
-| `ARCHIVE_MODE` | no | `replace` | only `replace` is implemented |
+| `ARCHIVE_MODE` | no | `replace` | `replace` deletes the original after encoding; `archive` moves it to `ARCHIVE_DIR` instead |
+| `ARCHIVE_DIR` | if `ARCHIVE_MODE=archive` | — | absolute path; originals land at `ARCHIVE_DIR/<libName>/<relpath>` |
 | `MAX_RETRIES` | no | `2` | attempts ceiling before `failed_permanent` |
 | `MEDIFORGE_DB` | no | `/var/lib/mediforge/mediforge.db` | SQLite path |
 | `HTTP_TIMEOUT_UPLOAD` | no | `30m` | per-file upload deadline |
