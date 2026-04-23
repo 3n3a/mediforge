@@ -298,7 +298,24 @@ func (r *Runner) processFile(ctx context.Context, lib config.Library, file strin
 		return
 	}
 
-	finalPath, err := archive.SafeReplaceWithSidecars(file, tmp, sidecars)
+	var finalPath string
+	switch r.cfg.ArchiveMode {
+	case "archive":
+		archiveTarget, aerr := archiveTargetFor(r.cfg.ArchiveDir, lib, file)
+		if aerr != nil {
+			_ = os.Remove(tmp)
+			subtitles.CleanupTmp(sidecars)
+			if ferr := r.cache.FailAttempt(file, "archive_failed", aerr.Error(), opts.MaxRetries); ferr != nil {
+				logger.Warn("jobs fail attempt", slog.String("err", ferr.Error()))
+			}
+			logger.Error("archive target failed", slog.String("action", "error"), slog.String("err", aerr.Error()))
+			s.failed++
+			return
+		}
+		finalPath, err = archive.SafeArchiveWithSidecars(file, tmp, archiveTarget, sidecars)
+	default:
+		finalPath, err = archive.SafeReplaceWithSidecars(file, tmp, sidecars)
+	}
 	if err != nil {
 		_ = os.Remove(tmp)
 		subtitles.CleanupTmp(sidecars)
@@ -331,6 +348,17 @@ func (r *Runner) processFile(ctx context.Context, lib config.Library, file strin
 		slog.String("final", trimRoot(finalPath, lib.Root)),
 	)
 	s.encoded++
+}
+
+func archiveTargetFor(archiveDir string, lib config.Library, src string) (string, error) {
+	rel, err := filepath.Rel(lib.Root, src)
+	if err != nil {
+		return "", fmt.Errorf("rel %s under %s: %w", src, lib.Root, err)
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("file %s not under library root %s", src, lib.Root)
+	}
+	return filepath.Join(archiveDir, lib.Name, rel), nil
 }
 
 func trimRoot(path, root string) string {

@@ -20,6 +20,7 @@ type Master struct {
 	WorkerURL         string
 	WorkerToken       string
 	ArchiveMode       string
+	ArchiveDir        string
 	MaxRetries        int
 	DBPath            string
 	UploadTimeout     time.Duration
@@ -77,8 +78,27 @@ func LoadMaster() (*Master, error) {
 		return nil, errors.New("WORKER_TOKEN is required")
 	}
 
-	if cfg.ArchiveMode != "replace" {
-		return nil, fmt.Errorf("ARCHIVE_MODE=%q unsupported; only 'replace' is implemented", cfg.ArchiveMode)
+	switch cfg.ArchiveMode {
+	case "replace":
+	case "archive":
+		cfg.ArchiveDir = os.Getenv("ARCHIVE_DIR")
+		if cfg.ArchiveDir == "" {
+			return nil, errors.New("ARCHIVE_MODE=archive requires ARCHIVE_DIR")
+		}
+		if !filepath.IsAbs(cfg.ArchiveDir) {
+			return nil, fmt.Errorf("ARCHIVE_DIR %q must be an absolute path", cfg.ArchiveDir)
+		}
+		cfg.ArchiveDir = filepath.Clean(cfg.ArchiveDir)
+		for _, lib := range cfg.Libraries {
+			if cfg.ArchiveDir == lib.Root || strings.HasPrefix(cfg.ArchiveDir, lib.Root+string(filepath.Separator)) {
+				return nil, fmt.Errorf("ARCHIVE_DIR %q must not be inside library %q root %q", cfg.ArchiveDir, lib.Name, lib.Root)
+			}
+		}
+		if err := os.MkdirAll(cfg.ArchiveDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create ARCHIVE_DIR %q: %w", cfg.ArchiveDir, err)
+		}
+	default:
+		return nil, fmt.Errorf("ARCHIVE_MODE=%q unsupported (replace|archive)", cfg.ArchiveMode)
 	}
 
 	maxRetries, err := getenvInt("MAX_RETRIES", 2)

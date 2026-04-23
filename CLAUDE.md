@@ -150,8 +150,13 @@ mediforge version
 - [x] `SafeReplaceWithSidecars` — atomic multi-file placement with rollback
 - [x] `deploy/fix-embedded-subs.sh` — one-off backfill for already-processed files
 
-### Phase 5 — Future (only if needed)
-- [ ] `archive` mode (move originals to `ARCHIVE_DIR` instead of `replace`)
+### Phase 5 — Archive mode ✓
+- [x] `ARCHIVE_MODE=archive` moves originals to `ARCHIVE_DIR/<lib>/<relpath>`
+      instead of deleting them; cross-filesystem safe (copy+fsync+unlink fallback)
+- [x] Collision handling: identical file (size+mtime) already archived → skip
+      move, delete src; different file → auto-suffix (`foo.1.mkv`, `foo.2.mkv`)
+
+### Phase 6 — Future (only if needed)
 - [ ] Multiple worker support (requires worker selection strategy)
 - [ ] Disk-space preflight on worker (507 Insufficient Storage)
 - [ ] Alternate encoding profiles (HEVC for non-Apple-TV-3 content)
