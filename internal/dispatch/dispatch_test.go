@@ -1,7 +1,6 @@
 package dispatch
 
 import (
-	"reflect"
 	"testing"
 )
 
@@ -19,10 +18,16 @@ func TestFilterByPrefix(t *testing.T) {
 			want:   []string{"/tv/A/a.mkv", "/tv/B/b.mkv"},
 		},
 		{
-			name:   "match one dir",
+			name:   "match one dir with trailing slash",
 			files:  []string{"/tv/A/a.mkv", "/tv/B/b.mkv", "/tv/A/c.mkv"},
 			prefix: "/tv/A/",
 			want:   []string{"/tv/A/a.mkv", "/tv/A/c.mkv"},
+		},
+		{
+			name:   "match one dir without trailing slash (normalized)",
+			files:  []string{"/tv/A/a.mkv", "/tv/AB/b.mkv"},
+			prefix: "/tv/A",
+			want:   []string{"/tv/A/a.mkv"},
 		},
 		{
 			name:   "no match",
@@ -31,40 +36,31 @@ func TestFilterByPrefix(t *testing.T) {
 			want:   []string{},
 		},
 		{
-			name:   "prefix without trailing slash",
-			files:  []string{"/tv/A/a.mkv", "/tv/AB/b.mkv"},
-			prefix: "/tv/A",
-			want:   []string{"/tv/A/a.mkv", "/tv/AB/b.mkv"},
-		},
-		{
-			name:   "prefix with trailing slash is precise",
-			files:  []string{"/tv/A/a.mkv", "/tv/AB/b.mkv"},
-			prefix: "/tv/A/",
-			want:   []string{"/tv/A/a.mkv"},
+			name:   "exact file match",
+			files:  []string{"/tv/A/file.mkv", "/tv/A/file.mkv.tmp"},
+			prefix: "/tv/A/file.mkv",
+			want:   []string{"/tv/A/file.mkv"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := filterByPrefix(tc.files, tc.prefix)
-			if !reflect.DeepEqual(got, tc.want) {
+			if !sliceEqual(got, tc.want) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// filterByPrefix filters paths to those starting with prefix.
-// This is the same logic used in runLibrary.
-func filterByPrefix(files []string, prefix string) []string {
-	if prefix == "" {
-		return files
+func sliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	filtered := files[:0]
-	for _, f := range files {
-		if len(f) >= len(prefix) && f[:len(prefix)] == prefix {
-			filtered = append(filtered, f)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
-	return filtered
+	return true
 }

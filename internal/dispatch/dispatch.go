@@ -42,6 +42,29 @@ type runSummary struct {
 	scanned, skippedCached, skippedPerm, encoded, failed int
 }
 
+// filterByPrefix returns the subset of files matching prefix.
+// If prefix has no trailing separator it is treated as a directory path and
+// one is added. An exact file-path match is also accepted so callers can
+// pass a single file.
+func filterByPrefix(files []string, prefix string) []string {
+	if prefix == "" {
+		return files
+	}
+	// Normalise: if the user omitted the trailing slash we add it so that
+	// "/tv/S01" doesn't match "/tv/S01-extra/…".
+	dirPrefix := prefix
+	if !strings.HasSuffix(dirPrefix, string(filepath.Separator)) {
+		dirPrefix += string(filepath.Separator)
+	}
+	var out []string
+	for _, f := range files {
+		if f == prefix || strings.HasPrefix(f, dirPrefix) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func NewRunner(cfg *config.Master, c *cache.Cache, cl *client.Client, log *slog.Logger) *Runner {
 	return &Runner{cfg: cfg, cache: c, client: cl, log: log}
 }
@@ -127,15 +150,8 @@ func (r *Runner) runLibrary(ctx context.Context, lib config.Library, opts Option
 		return s, fmt.Errorf("walk %s: %w", lib.Root, err)
 	}
 
-	// Filter to path prefix if requested.
 	if opts.PathPrefix != "" {
-		filtered := files[:0]
-		for _, f := range files {
-			if strings.HasPrefix(f, opts.PathPrefix) {
-				filtered = append(filtered, f)
-			}
-		}
-		files = filtered
+		files = filterByPrefix(files, opts.PathPrefix)
 	}
 
 	r.log.Info("library scan", slog.String("library", lib.Name), slog.Int("files", len(files)))
