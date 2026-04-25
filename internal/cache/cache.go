@@ -284,6 +284,26 @@ func (c *Cache) DeleteJob(path string) error {
 	return err
 }
 
+// DeleteProbePrefix deletes all probe rows whose path starts with prefix.
+func (c *Cache) DeleteProbePrefix(prefix string) (int64, error) {
+	res, err := c.db.Exec(`DELETE FROM probes WHERE path LIKE ? || '%'`, prefix)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// DeleteJobPrefix deletes all job rows whose path starts with prefix.
+func (c *Cache) DeleteJobPrefix(prefix string) (int64, error) {
+	res, err := c.db.Exec(`DELETE FROM jobs WHERE path LIKE ? || '%'`, prefix)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // SweepStaleActive reclaims jobs left in 'active' status by a crashed prior run.
 func (c *Cache) SweepStaleActive() (int64, error) {
 	res, err := c.db.Exec(`UPDATE jobs SET status='failed', last_error='stale active job reclaimed', last_error_code='stale_active', completed_at_unix=? WHERE status='active'`, time.Now().Unix())

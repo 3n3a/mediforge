@@ -63,7 +63,7 @@ Usage:
   mediforge dispatch [library...]       Walk libraries, encode files not in target format
   mediforge probe <file>                Probe a single file, print JSON
   mediforge cache stats                 Show probe/jobs statistics
-  mediforge cache evict <path>          Forget a path (probe + jobs)
+  mediforge cache evict <path>          Forget a path or directory (probe + jobs)
   mediforge jobs list [--status=STATUS] List jobs (status: active|done|failed|failed_permanent)
   mediforge jobs retry <path>           Clear failed_permanent flag, reset attempts to 0
   mediforge version                     Print version
@@ -72,6 +72,7 @@ Flags for 'dispatch':
   --dry-run              Probe and log decisions; do not upload or mutate files.
   --force                Ignore probe cache and failed_permanent flag.
   --max-retries N        Override MAX_RETRIES for this run.
+  --path-prefix PATH     Only process files under this directory.
   --log-level LEVEL      debug|info|warn|error
   --db PATH              Override MEDIFORGE_DB.
 
@@ -91,6 +92,7 @@ func cmdDispatch(ctx context.Context, args []string) int {
 	maxRetries := fs.Int("max-retries", 0, "override MAX_RETRIES for this run (0 = use env)")
 	logLevel := fs.String("log-level", "", "override LOG_LEVEL")
 	dbOverride := fs.String("db", "", "override MEDIFORGE_DB")
+	pathPrefix := fs.String("path-prefix", "", "only process files under this path")
 	_ = fs.Parse(args)
 
 	if *dbOverride != "" {
@@ -140,6 +142,7 @@ func cmdDispatch(ctx context.Context, args []string) int {
 		FFmpegBin:  cfg.FFmpegBin,
 		FFprobeBin: cfg.FFprobeBin,
 		Libraries:  libs,
+		PathPrefix: *pathPrefix,
 	}
 	if *maxRetries > 0 {
 		opts.MaxRetries = *maxRetries
@@ -267,6 +270,24 @@ func cmdCache(ctx context.Context, args []string) int {
 			return 2
 		}
 		path := args[1]
+		// If path is a directory, bulk-evict all rows under it.
+		if st, err := os.Stat(path); err == nil && st.IsDir() {
+			// Ensure trailing slash so LIKE doesn't match a sibling like /tv/series-123extra
+			prefix := filepath.Clean(path) + string(os.PathSeparator)
+			pn, err := c.DeleteProbePrefix(prefix)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			jn, err := c.DeleteJobPrefix(prefix)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			fmt.Printf("evicted %d probe(s) and %d job(s) under %s\n", pn, jn, path)
+			return 0
+		}
+		// Single-file path (existing behaviour).
 		if err := c.DeleteProbe(path); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1

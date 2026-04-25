@@ -28,6 +28,7 @@ type Options struct {
 	FFprobeBin   string
 	Libraries    []config.Library
 	Jellyfin     *jellyfin.Client // nil when disabled
+	PathPrefix   string            // if non-empty, only process files under this path
 }
 
 type Runner struct {
@@ -125,6 +126,18 @@ func (r *Runner) runLibrary(ctx context.Context, lib config.Library, opts Option
 	if err != nil {
 		return s, fmt.Errorf("walk %s: %w", lib.Root, err)
 	}
+
+	// Filter to path prefix if requested.
+	if opts.PathPrefix != "" {
+		filtered := files[:0]
+		for _, f := range files {
+			if strings.HasPrefix(f, opts.PathPrefix) {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+
 	r.log.Info("library scan", slog.String("library", lib.Name), slog.Int("files", len(files)))
 
 	for _, file := range files {
